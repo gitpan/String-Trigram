@@ -4,3 +4,7 @@ Revision history for Perl extension String::Trigram.
 	- original version; created by h2xs 1.21 with options
 		-AX Trigram
 
+0.02  Wed Jan 16, 2001
+  - Added use locale to methods getSimilarStrings() and _trigramify() on kind 
+    suggestion by Oleg Bartunov. This should make keepOnlyAlNums and ignoreCase 
+    work correctly with non-ascii characters.

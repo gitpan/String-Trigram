@@ -315,6 +315,11 @@ SEE ALSO
     *   "Text::Soundex" - Uses soundex method to compute similarity between
         strings.
 
+    For an early description of the method, see: R.C. Angell, G.E. Freund,
+    and P. Willet. Automatic spelling correction using a trigram similarity
+    measure. Information Processing and Management, 19(4):255--261, 1983.
+
+        
 COPYRIGHT AND LICENCE
 
 Copyright (c) 1997 Tarek Ahmed. All rights reserved. This program is free 

@@ -10,7 +10,7 @@ require Exporter;
 
 our @ISA = qw(Exporter);
 our @EXPORT_OK = ( 'compare' );
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 our $DEFAULT_MIN_SIM          = 0;
 our $DEFAULT_WARP             = 1.0;
@@ -179,6 +179,8 @@ sub debug
 
 sub getSimilarStrings
 {
+# oleg@sai.msu.su
+  use locale;
   my $self    = shift;
   my $str     = shift;
   my $result  = shift;
@@ -342,9 +344,9 @@ sub _getTrigIdx
 # The default for e is 1. If e is > 1.0, short strings are getting away
 # better, if e is < 1.0 short strings are getting away worse.
 # 
-# Paramters
+# Parameters
 # 
-# $newStr     string to be matches
+# $newStr     string to be matched
 # $newSimInfo KEY = potentially matching string, VALUE = number of matching trigrams
 # $newResult  KEY = actually matching string, VALUE = similarity value
 # 
@@ -381,7 +383,7 @@ sub _computeSimilarity
     # every string has two trigrams less than it has characters. If it is padded with
     # blanks, there is one additional trigram for each blank. So to compute the number
     # of trigrams of two strings we subtract 4 and add the number of padded blanks *
-    # 2. Since $newStr is already padded we add $padNum only once for the non paddes
+    # 2. Since $newStr is already padded we add $padNum only once for the non padded
     # $actName. Finally, to get $allStrings (types not tokens) we need to subtract
     # the number of matching trigrams - those occuring in both strings - once.
     $allTrigs = $len + $newSimInfo->{$_}->{len} - 4 - $sameTrigs;
@@ -438,6 +440,8 @@ sub _computeSimilarity
 
 sub _trigramify
 {
+# oleg@sai.msu.su
+  use locale;
   my $list       = shift;
   my $ignoreCase = shift;
   my $keepAlNums = shift;
@@ -874,6 +878,10 @@ C<String::Approx> - Uses Levenshtein edit distance to compute similarity between
 C<Text::Soundex> - Uses soundex method to compute similarity between strings.
 
 =back
+
+For an early description of the method, see:  R.C. Angell, G.E. Freund, and P. 
+Willet. Automatic spelling correction using a trigram similarity measure. 
+Information Processing and Management, 19(4):255--261, 1983.
 
 =cut
 
