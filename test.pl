@@ -5,11 +5,35 @@
 
 use Test;
 use strict;
-BEGIN { plan tests => 11 };
+#use Data::Dumper;
+BEGIN { plan tests => 19 };
 use String::Trigram qw (compare);
 
 my %tests = ();
-my $verbose = $ARGV[0];
+#my $verbose = $ARGV[0];
+my $verbose = 1;
+
+$tests{"1-gram"} =
+  sub {((sprintf("%.2f", compare("abc", "aabc", ngram => 1)) == 0.75) and
+        (sprintf("%.1f", compare("ab",  "aabc", ngram => 1)) == 0.5))};
+
+$tests{"2-gram"} =
+  sub {((sprintf("%.2f", compare("abc", "aabc", ngram => 2)) == 0.8) and
+        (sprintf("%.2f", compare("ab",  "aabc", ngram => 2)) == 0.33))};
+
+$tests{"3-gram"} =
+  sub {((sprintf("%.4f", compare("abc", "aabc", ngram => 3)) == 0.5714) and
+        (sprintf("%.4f", compare("ab",  "aabc", ngram => 3)) == 0.1111))};
+
+$tests{"4-gram"} =
+  sub {((sprintf("%.2f", compare("abc", "aabc", ngram => 4)) == 0.44) and
+        (sprintf("%.4f", compare("ab",  "aabc", ngram => 4)) == 0.0909) and
+        (compare("yz",  "aabc", ngram => 4) == 0))};
+
+$tests{"7-gram"} =
+  sub {((sprintf("%.4f", compare("abc", "aabc", ngram => 7)) == 0.2667) and
+        (sprintf("%.4f", compare("ab",  "aabc", ngram => 7.2)) == 0.0588) and
+        (sprintf("%.4f", compare("aabc",  "ab", ngram => 7)) == 0.0588))};
 
 $tests{"identical strings"} =
   sub {((compare("abc", "abc")             == 1) and
@@ -23,20 +47,21 @@ $tests{"completely different strings"} =
 
 $tests{"several tokens of one trigram type"} =
   sub {((compare("abcabc", "abcabc") == 1) and
-        (compare("abc", "abcabc")    == 0.5))};
+        (compare("abc", "abcabc")    == 0.625))};
 
 $tests{"compare a to b equals compare b to a"} =
   sub {compare("kangaroo", "cockatoo") == compare("cockatoo", "kangaroo")};
 
 $tests{"warp"} =
-  sub {sprintf("%.2f", compare("abc", "abcabc", warp => 1.5)) == 0.65};
+  sub {sprintf("%.2f", compare("abc", "abcabc", warp => 1.5)) == 0.65 and
+       sprintf("%.2f", compare("abc", "abcabc", warp => 2.3)) == 0.9};
 
 $tests{"keep only alphanumerics"} =
   sub {((compare("a+bc%}", "--:a.b?c##", keepOnlyAlNums => 1) == 1) and
         (compare("a+bc%}", "--:a.b?c##", keepOnlyAlNums => 0) == 0))};
 
 $tests{"ignore case"} =
-  sub {sprintf("%.2f", compare("abc", "abcabc", warp => 1.5)) == 0.65};
+  sub {sprintf("%.2f", compare("Abc", "abCabc", warp => 1.5)) == 0.77};
 
 $tests{"warp"} =
   sub {((compare("abc", "AbC", ignoreCase => 1) == 1) and
@@ -45,25 +70,46 @@ $tests{"warp"} =
 $tests{"reInit"} =
   sub {
          my $trig = new String::Trigram(cmpBase => ["abc", "def", "ghi"]);
-         $trig->reInit(["jkl", "mno"]);
+         $trig->reInit(["jkl", "mno"], debug => 1);
          my $res = {};
-         return 1 if (($trig->getSimilarStrings("abc", $res) == 0) and
-                      ($trig->getSimilarStrings("mno", $res) == 1));
-         return 0;
+         ($trig->getSimilarStrings("abc", $res) == 0) and
+	 ($trig->getSimilarStrings("def", $res) == 0) and
+	 ($trig->getSimilarStrings("ghi", $res) == 0) and
+	 ($trig->getSimilarStrings("xyz", $res) == 0) and
+	 ($trig->getSimilarStrings("jkl", $res) == 1) and
+         ($trig->getSimilarStrings("mno", $res) == 1);
       };
 
-$tests{"getBestMatch"} =
+$tests{"extendBase"} =
+  sub {
+         my $trig = new String::Trigram(cmpBase => ["abc", "def", "ghi"]);
+         $trig->extendBase(["jkl", "mno"]);
+         my $res = {};
+         ($trig->getSimilarStrings("abc", $res) == 1) and
+	 ($trig->getSimilarStrings("def", $res) == 1) and
+	 ($trig->getSimilarStrings("ghi", $res) == 1) and
+	 ($trig->getSimilarStrings("xyz", $res) == 0) and
+	 ($trig->getSimilarStrings("jkl", $res) == 1) and
+         ($trig->getSimilarStrings("mno", $res) == 1);
+      };
+
+$tests{"getBestMatch/1"} =
   sub {
          my $trig = new String::Trigram(cmpBase => ["abc", "abcabc", "aabc"]);
-         my $sims = {};
          my $best = [];
 
-         $trig->getSimilarStrings("abc", $sims);
+         ($trig->getBestMatch("abc", $best) == 1) and
+         (@$best == 1) and
+         ($best->[0] eq "abc");
+      };
 
-         return 1 if (($trig->getBestMatch("abc", $best) == 1) and
-                      (@$best == 1) and
-                      ($best->[0] eq "abc"));
-         return 0;
+$tests{"getBestMatch/2"} =
+  sub {
+         my $trig = new String::Trigram(cmpBase => ["abc"], minSim => 0.3);
+
+         (sprintf("%.2f", $trig->getBestMatch("ab", [], warp => 3)) != 0) and
+         (sprintf("%.2f", $trig->getBestMatch("ab", [])) == 0)            and
+	 (sprintf("%.2f", $trig->getBestMatch("ab", [], minSim => 0.1)) == 0.29);
       };
 
 $tests{"minSim"} =
@@ -82,11 +128,18 @@ $tests{"minSim"} =
 
          my $msEnd = $trig->minSim();
 
-         return 1 if (($msBeg == 0)        and
-                      ($msEnd == 0.9)      and
-                      (keys(%$sims1) == 3) and
-                      (keys(%$sims2) == 1));
-         return 0;
+         ($msBeg == 0)        and
+         ($msEnd == 0.9)      and
+         (keys(%$sims1) == 3) and
+         (keys(%$sims2) == 1);
+      };
+
+$tests{"keeping base of comparison unique"} =
+  sub {
+         my $trig1 = new String::Trigram(cmpBase => ["abcabc"]);
+         my $trig2 = new String::Trigram(cmpBase => ["abcabc", "abcabc", "abcabc"]);
+
+         $trig1->getBestMatch("cabcab", []) == $trig2->getBestMatch("cabcab", []);
       };
 
 $tests{"padding"} =
@@ -108,7 +161,7 @@ sub testMe
   my $name = shift;
   my $lon  = shift;
 
-  print "testing: $name ", '.' x ($lon + 3 - length ($name)), ' ' if $verbose;
+  print "$name ", '.' x ($lon + 1 - length ($name)), ' ' if $verbose;
   ok($tests{$name});
 }
 

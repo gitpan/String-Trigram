@@ -1,6 +1,8 @@
 Changes
 Makefile.PL
 MANIFEST
+ppport.h
 README
-test.pl
 Trigram.pm
+Trigram.xs
+test.pl

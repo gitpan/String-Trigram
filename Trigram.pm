@@ -1,33 +1,40 @@
 package String::Trigram;
 
 use Carp;
+use locale;
 
 use 5.6.0;
 use strict;
 use warnings;
 
 require Exporter;
+require DynaLoader;
 
-our @ISA = qw(Exporter);
+our @ISA = qw(Exporter DynaLoader);
 our @EXPORT_OK = ( 'compare' );
-our $VERSION = '0.02';
+our $VERSION = '0.1';
+
+bootstrap String::Trigram $VERSION;
 
 our $DEFAULT_MIN_SIM          = 0;
 our $DEFAULT_WARP             = 1.0;
 our $DEFAULT_IGNORE_CASE      = 1;
 our $DEFAULT_KEEP_ONLY_ALNUMS = 0;
-our $DEFAULT_PADDING          = 1;
 our $DEFAULT_DEBUG            = 0;
+our $DEFAULT_NGRAM_LEN        = 3;
+our $DEFAULT_PADDING          = $DEFAULT_NGRAM_LEN - 1;
 
 sub new
 {
   my ($pkg, %params) = @_;
-  
+
+  my $seen = {};
+
   _setParams(\%params);
-  
+
   foreach (keys %params)
   {
-    croak "Unknown parameter $_!" if ($_ !~ /^(cmpBase|minSim|warp|ignoreCase|keepOnlyAlNums|padding|debug)$/);
+    croak "Unknown parameter $_!" if ($_ !~ /^(cmpBase|minSim|warp|ignoreCase|keepOnlyAlNums|padding|debug|ngram)$/);
   }
 
   # check for reasonable values
@@ -41,21 +48,40 @@ sub new
     croak "Minimal similarity must be >= 0 and <= 1.0";
   }
 
+  if (defined $params{ngram} && ($params{ngram} <= 0))
+  {
+    croak "n in n-gram must be > 0";
+  }
+
   if ($params{warp} == 0)
   {
     croak "Warp must be > 0";
   }
 
-  if (($params{padding} < 0) || ($params{padding} > 2))
+  if (($params{padding} < 0) || ($params{padding} > $params{ngram} - 1))
   {
-    croak "Padding must be between 0 and 2.";
+    croak "Padding must be between 0 and " . ($params{ngram} - 1) . ".";
   }
 
   my $self = bless
   {
+    ngram          => int ($params{ngram}),
     minSim         => $params{minSim},
     warp           => $params{warp},
-    trigIdx        => _trigramify($params{cmpBase}, $params{ignoreCase}, $params{keepOnlyAlNums}, ' ' x $params{padding}),
+
+    # index for trigrams
+    trigIdx        => _trigramify($params{cmpBase},
+				  $params{ignoreCase}, 
+				  $params{keepOnlyAlNums},
+				  ' ' x $params{padding},
+				  undef,
+				  $params{ngram},
+				  $seen),
+
+    # index of all strings fed to the object, so no string is 
+    # processed twice (this might lead to wrong results)
+    seenStrings    => $seen,
+
     ignoreCase     => $params{ignoreCase},
     keepOnlyAlNums => $params{keepOnlyAlNums},
     padding        => ' ' x $params{padding},
@@ -68,16 +94,15 @@ sub new
 
 sub compare
 {
-  my ($s1, $s2, %params) = @_;
+  my ($s1, $s2) = (shift, shift);
+
+  croak "I need at least 2 strings to compare as parameters, died" unless defined $s2;
+
   my $result = {};
 
-  my $_tr = new String::Trigram(cmpBase => [$s1], %params);
+  new String::Trigram(cmpBase => [$s1], @_)->getSimilarStrings($s2, $result);
 
-  $_tr->getSimilarStrings($s2, $result);
-
-  return $result->{$_} for keys %$result;
-
-  return 0;
+  $result->{$s1} || 0;
 }
 
 sub reInit
@@ -86,10 +111,34 @@ sub reInit
 
   if ((!$newCmpBase) or (ref(@$newCmpBase ne 'ARRAY')))
   {
-    croak "We need a base for comparison, so,  as a parameter to this method, we do need a reference to an anonymous array of strings being the base of comparison.\n";
+    croak "We need a base for comparison, so, as a parameter to this method, we do need a reference to an anonymous array of strings being the base of comparison.\n";
   }
 
-  $self->_setTrigIdx(_trigramify($newCmpBase, $self->ignoreCase(), $self->keepOnlyAlNums(), $self->padding()));
+  $self->_setTrigIdx(_trigramify($newCmpBase,
+				 $self->{ignoreCase},
+				 $self->{keepOnlyAlNums},
+				 $self->{padding},
+		                 undef, 
+				 $self->{ngram},
+				 $self->{seenStrings}));
+}
+
+sub extendBase
+{
+  my ($self, $newStrings) = @_;
+
+  if ((!$newStrings) or (ref(@$newStrings ne 'ARRAY')))
+  {
+    croak "We need to add to the base for comparison, so, as a parameter to this method, we do need a reference to an anonymous array of strings being added to the base of comparison.\n";
+  }
+
+  $self->_setTrigIdx(_trigramify($newStrings,
+				 $self->{ignoreCase},
+				 $self->{keepOnlyAlNums},
+				 $self->{padding},
+				 $self->{trigIdx},
+				 $self->{ngram},
+				 $self->{seenStrings}));
 }
 
 sub minSim
@@ -110,7 +159,7 @@ sub warp
 {
   my ($self, $newWarp) = @_;
 
-  if ((defined $newWarp) && ($newWarp == 0))
+  if ((defined $newWarp) && ($newWarp <= 0))
   {
     croak "Warp must be > 0";
   }
@@ -142,14 +191,14 @@ sub padding
 {
   my ($self, $newPadding) = @_;
 
-  if ((defined $newPadding) && ((($newPadding < 0) || ($newPadding > 2))))
+  if ((defined $newPadding) && ((($newPadding < 0) || ($newPadding > $self->{ngram} - 1))))
   {
-    croak "Padding must be between 0 and 2.";
+    croak "Padding must be between 0 and " . $self->{ngram} - 1 . ".";
   }
 
-  $self->{padding} = $newPadding if ($newPadding);
+  $self->{padding} = ' ' x $newPadding if ($newPadding);
 
-  return $self->{padding};
+  return length $self->{padding};
 }
 
 sub debug
@@ -161,7 +210,7 @@ sub debug
   return $self->{debug};
 }
 
-# Splits str into trigrams and looks up every trigram in _trigIdx. If
+# Splits str into trigrams and looks up every trigram in trigIdx. If
 # successfull, it finds a list of strings containing the trigram and
 # increases the value of the string containing the trigram by 1 in the
 # lexical $simInfo (ref. to hash). Uses _computeSimilarity() to compute
@@ -171,6 +220,7 @@ sub debug
 #
 # result KEY = matching string, VALUE = similarity value
 # str    string to be matched
+# data   further key-val-pairs for min sim and warp
 #
 # Returns
 #
@@ -179,19 +229,25 @@ sub debug
 
 sub getSimilarStrings
 {
-# oleg@sai.msu.su
-  use locale;
   my $self    = shift;
   my $str     = shift;
   my $result  = shift;
-  
+  my %data    = @_ if @_;
+
+  my $curMinSim = $data{minSim};
+  my $curWarp   = $data{warp};
+
+  $curMinSim ||= $self->{minSim};
+  $curWarp   ||= $self->{warp};
+
   croak "I need a reference to a hash as second parameter for getSimilarStrings()!" if (ref($result) ne 'HASH');
 
-  my $trigram = ""; # contains current trigram
-  my $matches = {}; # is pointed to all strings containing current trigram
-  my $len     = -1; # length of the string to compare
-  my $actNum  = -1; # that's how many times current trigram is found in string
-  my $actName = ""; # this is a string containing current trigram
+  my $trigram;      # contains current trigram
+  my $matches;      # is pointed to all strings containing current trigram
+  my $len;          # length of the string to compare
+  my $actNum;       # that's how many times current trigram is found in string
+  my $actName;      # this is a string containing current trigram
+  my $actMatch;     # current match
 
   # KEY = trigram, SUBKEY = potentially similar string, VALUE = number
   # of times, trigrams is found in string.
@@ -205,33 +261,33 @@ sub getSimilarStrings
   # KEY = potentially similar string, VALUE = number of identical trigrams
   my $simInfo = {};
 
-  $str =~ s/\W//g if $self->keepOnlyAlNums();
-  $str = lc $str  if $self->ignoreCase();
+  $str =~ s/\W//g if $self->{keepOnlyAlNums};
+  $str = lc $str  if $self->{ignoreCase};
 
-  $str = $self->padding() . $str . $self->padding();
-  $len = length($str) - 2;
-  
+  $str = $self->{padding} . $str . $self->{padding};
+
+  # Number of n-grams is length of string minus n + 1
+  $len = length($str) - $self->{ngram} + 1;
+
   # **********************************************************
   # divide string to compare into trigrams and search trigrams
   # **********************************************************
 
   for (my $i = 0; $i < $len; $i++)
   {
-    $trigram = substr($str, $i, 3);
+    $trigram = substr($str, $i, $self->{ngram});
 
     # look for every trigram in $self->{trigIdx}
-    
     # contine unless found
-    next unless (exists($self->_getTrigIdx()->{$trigram}));
+    next unless (exists($self->{trigIdx}->{$trigram}));
 
     # point matches to strings containing current trigram
-    $matches = $self->_getTrigIdx()->{$trigram};
+    $matches = $self->{trigIdx}->{$trigram};
 
     # check every string containing current trigram
-    foreach (keys(%$matches))
+    while (($actName, $actMatch) = each %$matches)
     {
-      $actName = $_;                      # this is a string containing current trigram
-      $actNum  = $matches->{$_}->{trigs}; # so many times current trigram is found in string
+      $actNum  = $actMatch->{trigs}; # so many times current trigram is found in string
 
       $trigNumBuf{$trigram}->{$actName} = $actNum unless (exists($trigNumBuf{$trigram}->{$actName}));
 
@@ -243,24 +299,24 @@ sub getSimilarStrings
 
         # mark that we have found one more matching trigram for $actName
         $simInfo->{$actName}->{name}++;
-        $simInfo->{$actName}->{len} = $matches->{$_}->{len};
+        $simInfo->{$actName}->{len} = $actMatch->{len};
       }
     }
   }
 
-  return $self->_computeSimilarity($str, $simInfo, $result);
+  return $self->_computeSimilarity($str, $simInfo, $result, $curMinSim, $curWarp);
 }
 
 # Uses getSimilarStrings() to get matching strings and filters out the
 # best one(s).
-# 
+#
 # Parameters
-# 
+#
 # $inpStr     string to be matched
 # $outStrList list of best strings
-# 
+#
 # Returns
-# 
+#
 # similarity value of best match or -1, of no match
 
 sub getBestMatch
@@ -281,10 +337,9 @@ sub getBestMatch
   @$outStrList = ();
 
   # there are no similar strings at all
-  if ($self->getSimilarStrings($inpStr, $rslt) == 0)
+  if ($self->getSimilarStrings($inpStr, $rslt, @_) == 0)
   {
-    $maxVal = -1;
-    return -1;
+    return 0;
   }
 
   # there is at least one similar string
@@ -336,22 +391,24 @@ sub _getTrigIdx
 # Computes similarity of potientially matching strings in hash
 # newSimInfo. The result is saved in newResult. The computation of the
 # similarity works like this:
-# 
+#
 # (a = all trigrams, d = different trigrams, e = warp)
-# 
+#
 # (a**e - d**e)/a**e
-# 
+#
 # The default for e is 1. If e is > 1.0, short strings are getting away
 # better, if e is < 1.0 short strings are getting away worse.
-# 
+#
 # Parameters
-# 
+#
 # $newStr     string to be matched
 # $newSimInfo KEY = potentially matching string, VALUE = number of matching trigrams
 # $newResult  KEY = actually matching string, VALUE = similarity value
-# 
+# $curMinSim  current minimal similarity
+# $curWarp    current warp
+#
 # Returns
-# 
+#
 # number of matching strings
 
 sub _computeSimilarity
@@ -360,60 +417,57 @@ sub _computeSimilarity
   my $newStr     = shift;
   my $newSimInfo = shift;
   my $newResult  = shift;
+  my $curMinSim  = shift;
+  my $curWarp    = shift;
 
   # clear hash containing the results
   %$newResult = ();
 
   my $strCnt    = 0;                            # number of similar strings (return value)
-  my $allTrigs  = -1;                           # number of all trigrams
-  my $diffTrigs = -1;                           # number of different trigrams
-  my $sameTrigs = -1;                           # number of same trigrams
-  my $actSim    = -1;                           # similarity (0 - 1)
-  my $actName   = "";                           # potentially matching string
-  my $padNum    = length($self->padding()) * 2; # number of padding blanks
+  my $allTrigs;                                 # number of all trigrams
+  my $sameTrigs;                                # number of same trigrams
+  my $actSim;                                   # similarity (0 - 1)
   my $len       = length($newStr);              # length of string - $padNum for the padded blanks
 
   # check every potientially similar string (i.e. every string containing at least one
   # identical trigram)
   foreach (keys(%$newSimInfo))
   {
-    $actName   = $_;
     $sameTrigs = $newSimInfo->{$_}->{name};
+    
+    # the number of n-grams in a string result from subtracting n from the length of
+    # the string and adding 1. If it is padded with blanks, there is one additional
+    # n-gram for each blank. So to compute the number of n-grams of two strings we
+    # subtract n twice, add 2 and add the number of padded blanks * 2. Since $newStr
+    # is already padded and the length noted for $_ contains already the padding we
+    # do not need to take the padding explicitly into account. Finally, to get
+    # $allTrigs (types not tokens) we need to subtract the number of matching trigrams
+    # - those occuring in both strings - once.
+    $allTrigs = $len + $newSimInfo->{$_}->{len} - 2 * $self->{ngram} - $sameTrigs + 2;
 
-    # every string has two trigrams less than it has characters. If it is padded with
-    # blanks, there is one additional trigram for each blank. So to compute the number
-    # of trigrams of two strings we subtract 4 and add the number of padded blanks *
-    # 2. Since $newStr is already padded we add $padNum only once for the non padded
-    # $actName. Finally, to get $allStrings (types not tokens) we need to subtract
-    # the number of matching trigrams - those occuring in both strings - once.
-    $allTrigs = $len + $newSimInfo->{$_}->{len} - 4 - $sameTrigs;
+    $actSim = _computeActSim($sameTrigs, $allTrigs, $curWarp);
 
-    # no warp here so skip the complicated stuff below
-    if ($self->warp() == 1)
+    if ($self->{debug})
     {
-      $actSim = $sameTrigs/$allTrigs;
-    }
-    # we've got to take warp into account
-    else
-    {
-      $diffTrigs = $allTrigs - $sameTrigs;
-      $actSim = (($allTrigs**$self->warp()) - ($diffTrigs**$self->warp())) / ($allTrigs**$self->warp());
-    }
-
-    if ($self->debug())
-    {
-      print "\nNAME: ->${actName}<-\n";
-      print "SAME: $sameTrigs\n";
-      print "DIFF: $diffTrigs\n";
-      print "ALL : $allTrigs\n";
-      print "ACTS: $actSim\n";
-      print $self->warp(), "\n\n";
+	my $tmpStr = $self->{padding} . $_ . $self->{padding};
+      print STDERR "\nCompare\n";
+      print STDERR "$newStr ->", sort join (":", $newStr =~ /(?=(...))/g), "<-\n";
+      print STDERR "$tmpStr ->", sort join (":", $tmpStr  =~ /(?=(...))/g), "<-\n";
+      print STDERR "-" x (22 + length ($newStr) + 2 * length ($self->{padding}) + length ($_)), "\n";
+      print STDERR "N-GRAM-LEN: ", $self->{ngram}, "\n";
+      print STDERR "ALL :       ", $allTrigs, "\n";
+      print STDERR "SAME:       ", $sameTrigs, "\n";
+      print STDERR "DIFF:       ", $allTrigs - $sameTrigs, "\n";
+      print STDERR "ACTSIM:     ", $actSim, "\n";
+      print STDERR "PADDING:    ", length $self->{padding}, "\n";
+      print STDERR "MINSIM:     ", $self->{minSim}, "\n";
+      print STDERR "WARP:       ", $curWarp, "\n\n";
     }
 
     # count string as similar only if similarity exceeds minimal similarity
-    if ($actSim > $self->minSim())
+    if ($actSim > $curMinSim)
     {
-      $newResult->{$actName} = $actSim;
+      $newResult->{$_} = $actSim;
       $strCnt++;
     }
   }
@@ -421,51 +475,71 @@ sub _computeSimilarity
   return $strCnt;
 }
 
+sub _computeActSimOld {
+	my $sameTrigs = shift;
+	my $allTrigs  = shift;
+	my $curWarp   = shift;
+
+	my $diffTrigs = -1; # number of different trigrams
+	my $actSim    = -1; # similarity (0 - 1)
+
+    # no warp here so skip the complicated stuff below
+    if ($curWarp == 1) {
+	$actSim = $sameTrigs/$allTrigs;
+    } else {
+	# we've got to take warp into account
+	$diffTrigs = $allTrigs - $sameTrigs;
+	$actSim = (($allTrigs**$curWarp) - ($diffTrigs**$curWarp)) / ($allTrigs**$curWarp);
+    }
+}
+
 # Takes list of strings and puts them into an index of trigrams. KEY is a trigram,
 # VALUE a list of strings containing that trigram. VALUE has two KEYS:
-# 
+#
 # trigs: count of trigram occurring in string
 # len:   length of string (if $keepAlNums, after applying s/\W//g)
-# 
+#
 # Parameters
-# 
+#
 # $list       list of strings being the base of comparison
 # $ignoreCase ignore case if 1
 # $keepAlNums s/\W//g if 1
 # $pad        contains 0 - 2 blanks for padding
-# 
+#
 # Returns
-# 
+#
 # trigram index
 
 sub _trigramify
 {
-# oleg@sai.msu.su
-  use locale;
   my $list       = shift;
   my $ignoreCase = shift;
   my $keepAlNums = shift;
   my $pad        = shift;
-  my $newVal     = 0;
-  my $trigs      = {};
-  my $tmpStr     = "";
-  my $len        = -1;
+  my $trigs      = shift;
+  my $ngram      = shift;
+  my $seen       = shift;
+  my $tmpStr;
+  my $len;
 
   foreach (@$list)
   {
     $tmpStr = $_;
 
-    $tmpStr =~ s/\W//g   if $keepAlNums;
+   $tmpStr =~ s/\W//g   if $keepAlNums;
     $tmpStr = lc $tmpStr if $ignoreCase;
+
+    next if exists $seen->{$tmpStr};
+    $seen->{$tmpStr} = 1;
 
     $tmpStr = $pad . $tmpStr . $pad;
 
     $len = length($tmpStr);
 
-    for (my $i = 0; $i < (length($tmpStr) - 2); $i++)
+    for (my $i = 0; $i < (length($tmpStr) - $ngram + 1); $i++)
     {
-      $trigs->{substr($tmpStr, $i, 3)}->{$_}->{trigs}++;
-      $trigs->{substr($tmpStr, $i, 3)}->{$_}->{len} = $len;
+      $trigs->{substr($tmpStr, $i, $ngram)}->{$_}->{trigs}++;
+      $trigs->{substr($tmpStr, $i, $ngram)}->{$_}->{len} = $len;
     }
   }
 
@@ -477,21 +551,21 @@ sub _setParams
   my $params = shift;
 
   # set defaults, if not specified otherwise
+  $params->{ngram}          = $DEFAULT_NGRAM_LEN        unless exists $params->{ngram};
   $params->{minSim}         = $DEFAULT_MIN_SIM          unless exists $params->{minSim};
   $params->{warp}           = $DEFAULT_WARP             unless exists $params->{warp};
   $params->{ignoreCase}     = $DEFAULT_IGNORE_CASE      unless exists $params->{ignoreCase};
   $params->{keepOnlyAlNums} = $DEFAULT_KEEP_ONLY_ALNUMS unless exists $params->{keepOnlyAlNums};
-  $params->{padding}        = $DEFAULT_PADDING          unless exists $params->{padding};
+  $params->{padding}        = $params->{ngram} - 1      unless exists $params->{padding};
   $params->{debug}          = $DEFAULT_DEBUG            unless exists $params->{debug};
 }
 
 1;
-
 __END__
 
 =head1 NAME
 
-String::Trigram - Find similar strings by trigram method
+String::Trigram - Find similar strings by trigram (or 1, 2, 4, etc.-gram) method
 
 =head1 SYNOPSIS
 
@@ -503,12 +577,11 @@ String::Trigram - Find similar strings by trigram method
 
   my $trig = new String::Trigram(cmpBase => \@cmpBase);
 
-  my $num_of_sim_strings = $trig->getSimilarStrings("establishing", \%result);
+  my $numOfSimStrings = $trig->getSimilarStrings("establishing", \%result);
 
-  print "Found $num_of_sim_strings similar strings.\n";
+  print "Found $numOfSimStrings similar strings.\n";
 
-  foreach (keys %result)
-  {
+  foreach (keys %result) {
     print "Similar string $_ has a similarity of ", sprintf ("%02f", ($result{$_} * 100)), "%\n";
   }
 
@@ -528,11 +601,11 @@ String::Trigram - Find similar strings by trigram method
 =head1 DESCRIPTION
 
 This module computes the similarity of two strings based on the
-trigram method. This consists in splitting some string into triples of
+trigram method. This consists of splitting some string into triples of
 characters and comparing those to the trigrams of some other
 string. For example the string kangaroo has the trigrams C<{kan ang
 nga gar aro roo}>. A wrongly typed kanagaroo has the trigrams C<{kan
-ana nag aga gar aro roo}>. To compute the similarity we (roughly)
+ana nag aga gar aro roo}>. To compute the similarity we 
 divide the number of matching trigrams (tokens not types) by the
 number of all trigrams (types not tokens). For our example this means
 dividing 4 / 9 resulting in 0.44.
@@ -540,15 +613,14 @@ dividing 4 / 9 resulting in 0.44.
 To balance the disadvantage of the outer characters (every one of
 which occurs in only one trigram - while the second and the
 penultimate occur in two and the rest of the characters in three
-trigrams each) somewhat we pad the string with one blank on either
-side resulting in two more trigrams C<' ka'> and C<'ro '>.  Thus we
+trigrams each) somewhat we pad the string with blanks on either
+side resulting in two more trigrams C<' ka'> and C<'ro '>, when using a padding of one blank.  Thus we
 arrive at 6 matching trigrams and 11 trigrams all in all, resulting in
 a similarity value of 0.55.
 
-In the trigram method there is one thing that might appear as a
+When using the trigram method there is one thing that might appear as a
 problem: Two short strings with one (or two or three ...) different
-trigrams tend to produce a lower similarity then two long ones (if you
-don't believe it just check it out for yourself). To counteract this
+trigrams tend to produce a lower similarity then two long ones. To counteract this
 effect, you can set the module's C<warp> property. If you set it to
 something greater than 1.0 (try something between 1.0 and 3.0, flying
 at warp 9 won't get you anywhere here), this will lift the similarity
@@ -585,7 +657,7 @@ Please be aware of that a C<warp> less than 1.0 will result in an inverse
 effect pulling down the similarity of short strings a lot and the
 similarity of long ones less, resulting in the '###' curve. I have no
 idea what this can be good for, but it's just a side effect of the
-method. How is all this done? Take a look at the code ;-).
+method. How is all this done? Take a look at the code.
 
 Splitting strings into trigrams is a time consuming affair and if you
 want to compare a set of n strings to another set of m strings and you
@@ -627,7 +699,9 @@ else is taken care of unless you want to change the defaults:
                                  minSim         => 0.5,
                                  warp           => 1.6,
                                  ignoreCase     => 0,
-                                 keepOnlyAlNums => 1);
+                                 keepOnlyAlNums => 1,
+                                 ngram          => 5,
+                                 debug          => 1);
 
 PARAMETERS:
 
@@ -649,6 +723,11 @@ matching will be returned.
 
 =item *
 
+C<ngram> - If you do not want to use trigrams, but some other n in n-gram, 
+use this parameter, for example ngram => 5 for 5-grams.
+
+=item *
+
 C<warp> - Set warp attribute (see description). Default is 1.0 (no warp).
 
 =item *
@@ -664,7 +743,11 @@ is 0 (keep every character).
 =item *
 
 C<padding> - Set the number of blanks for padding string (see
-above). The number has to be between 0 and 2. Default is 1
+above). The number has to be between 0 and n-1 (n from n-gram). Default is n-1.
+
+=item *
+
+C<debug> - print some debugging information to STDERR
 
 =back
 
@@ -675,6 +758,10 @@ CROAKS IF ...
 =item *
 
 it gets an unknown parameter
+
+=item *
+
+ngram is 0
 
 =item *
 
@@ -690,7 +777,7 @@ warp is out of bounds (0 <= warp)
 
 =item *
 
-padding is out of bounds (should be 0 <= padding <= 2)
+padding is out of bounds (should be 0 <= padding <= n-1)
 
 =back
 
@@ -706,7 +793,23 @@ CROAKS IF ...
 
 =item *
 
-parameter cmpBase does not point to a reference to an array
+parameter does not point to a reference to an array
+
+=back
+
+=head2 extendBase
+
+  $trig->extendBase(["zebra", "tiger", "snake", "gorilla", "kangaroo"]);
+
+Add strings to object's base of comparison.
+
+CROAKS IF ...
+
+=over
+
+=item *
+
+parameter does not point to a reference to an array
 
 =back
 
@@ -771,7 +874,7 @@ CROAKS IF ...
 
 =item *
 
-padding is out of bounds (should be 0 <= padding <= 2)
+padding is out of bounds (should be 0 <= padding <= n-1)
 
 =back
 
@@ -780,17 +883,19 @@ padding is out of bounds (should be 0 <= padding <= 2)
   $trig->debug();
   $trig->debug(1);
 
-Get or set debug property. For debugging, set to 1.
+Get or set debug property. For debugging to STDERR, set to 1.
 
 =head2 getSimilarStrings
 
   my %results = ();
-  my $num_of_sim_strings = $trig->getSimilarStrings("zebrilla", \%results);
+  my $numOfSimStrings = $trig->getSimilarStrings("zebrilla", \%results [, minSim => 0.6, warp => 0.7]);
 
-Get similar strings for first parameter from base of comparison. The result is 
-saved in the second parameter (a reference to a hash), the keys being the strings 
-and the values the similarity values. The method returns the number of found 
+Get similar strings for first parameter from base of comparison. The result is
+saved in the second parameter (a reference to a hash), the keys being the strings
+and the values the similarity values. The method returns the number of found
 similar strings.
+
+If parameters minSim or warp are defined, those values are changed temporalily.
 
 CROAKS IF ...
 
@@ -805,13 +910,14 @@ second parameter is not a reference to a hash
 =head2 getBestMatch
 
   my @bestMatches = ();
-  my $sim = $trig->getBestMatch("zebrilla", \@bestMatches);
+  my $sim = $trig->getBestMatch("zebrilla", \@bestMatches [, minSim => 0.6, warp => 0.7]);
 
 Don't bother about all those more or less similar strings, just get the best
 one. This might actually be more than one, since several strings might result in
-the same similarity value. So the second parameter is a reference to an array,
-the first the string to compare. Returns similarity of best match or -1 if
-there are no similar strings at all.
+the same similarity value. So the second parameter is a reference to an array, taking the best similar strings,
+the first parameter is the string to compare. Returns similarity of best match or 0 if there are no similar strings at all (please observe that in the case of no match the return value was -1 up to $VERSION == 0.02).
+
+If parameters minSim or warp are defined, those values are changed temporarily.
 
 CROAKS IF ...
 
@@ -832,13 +938,15 @@ second parameter is not a reference to an array
 or
 
   my $sim = compare($string1,
-                    $string2,  
+                    $string2,
                     minSim         => 0.3,
                     warp           => 1.8,
                     ignoreCase     => 0,
-                    keepOnlyAlNums => 1);
+                    keepOnlyAlNums => 1,
+                    ngram          => 5,
+                    debug          => 1);
 
-Use this if you don't want use the oo- interface. Returns resulting similarity. 
+Use this if you don't want use the oo- interface. Returns resulting similarity.
 Note that this is not a very fast way to use the module, if you do a lot of 
 comparisons, since internally for every call to compare() a new Trigram object 
 is initialized (and C<DESTROY>ed as it goes out of scope).
@@ -857,7 +965,7 @@ Tarek Ahmed, E<lt>tarek@epost.deE<gt>
 
 =head1 COPYRIGHT
 
-Copyright (c) 1997 Tarek Ahmed. All rights reserved. This program is free 
+Copyright (c) 2003 Tarek Ahmed. All rights reserved. This program is free 
 software; you can redistribute it and/or modify it under the same terms as
 Perl itself.
 
