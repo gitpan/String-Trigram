@@ -28,3 +28,5 @@ Revision history for Perl extension String::Trigram.
   - made compare function save against getting no parameters (croaks
     now)
   - made getBestMatch return 0 instead of -1, when no match is found
+0.11  Fri Jul 25,  2008
+  - Fixed bug in reInit()

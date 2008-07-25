@@ -12,7 +12,7 @@ require DynaLoader;
 
 our @ISA = qw(Exporter DynaLoader);
 our @EXPORT_OK = ( 'compare' );
-our $VERSION = '0.1';
+our $VERSION = '0.11';
 
 bootstrap String::Trigram $VERSION;
 
@@ -29,7 +29,7 @@ sub new
   my ($pkg, %params) = @_;
 
   my $seen = {};
-
+  
   _setParams(\%params);
 
   foreach (keys %params)
@@ -113,6 +113,8 @@ sub reInit
   {
     croak "We need a base for comparison, so, as a parameter to this method, we do need a reference to an anonymous array of strings being the base of comparison.\n";
   }
+
+  $self->{seenStrings} = {};
 
   $self->_setTrigIdx(_trigramify($newCmpBase,
 				 $self->{ignoreCase},
@@ -521,7 +523,7 @@ sub _trigramify
   my $seen       = shift;
   my $tmpStr;
   my $len;
-
+  
   foreach (@$list)
   {
     $tmpStr = $_;

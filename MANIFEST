@@ -6,3 +6,4 @@ README
 Trigram.pm
 Trigram.xs
 test.pl
+META.yml                                 Module meta-data (added by MakeMaker)

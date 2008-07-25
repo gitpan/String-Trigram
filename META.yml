@@ -1,0 +1,13 @@
+--- #YAML:1.0
+name:                String-Trigram
+version:             0.11
+abstract:            Find similar strings by trigram (or 1, 2, 4, etc.-gram) method
+license:             ~
+author:              
+    - Tarek Ahmed <sirdis@gmx.net>
+generated_by:        ExtUtils::MakeMaker version 6.42
+distribution_type:   module
+requires:     
+meta-spec:
+    url:     http://module-build.sourceforge.net/META-spec-v1.3.html
+    version: 1.3
