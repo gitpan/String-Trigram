@@ -125,7 +125,7 @@ $tests{"reInit/2"} = sub {
 	my $sim2 = $trig->getBestMatch( 'abacate', \@bm2 );
 
 	my $res = {};
-	( $sim1 == $sim2 and @bm1 == @bm2 and @bm1 == 1);
+	( $sim1 == $sim2 and @bm1 == @bm2 and @bm1 == 1 );
 };
 
 $tests{"extendBase"} = sub {
